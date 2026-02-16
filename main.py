@@ -16,15 +16,18 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. SECURITY ---
+# --- 2. SECURITY & SESSION INITIALIZATION ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
-    if st.session_state.password_correct: return True
+    
+    if st.session_state.password_correct: 
+        return True
 
     st.title("💠 GEM >3 SECURE LINK")
     pwd = st.text_input("Enter Access Key", type="password")
     if st.button("Initialize Neural Link"):
+        # Access password from secrets (default to 'admin' if not set)
         if pwd == st.secrets.get("APP_PASSWORD", "admin"):
             st.session_state.password_correct = True
             st.rerun()
@@ -32,19 +35,20 @@ def check_password():
             st.error("Access Denied.")
     return False
 
+# Initialize Session States early to avoid AttributeErrors
+if "messages" not in st.session_state: 
+    st.session_state.messages = []
+if "total_tokens" not in st.session_state: 
+    st.session_state.total_tokens = 0
+
 if check_password():
     load_dotenv()
     genai.configure(api_key=os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY"))
 
-    # Session Initialization
-    if "messages" not in st.session_state: st.session_state.messages = []
-    if "total_tokens" not in st.session_state: st.session_state.total_tokens = 0
-
-    # --- 3. SIDEBAR: NEW FEATURES ---
+    # --- 3. SIDEBAR ---
     with st.sidebar:
         st.title("💠 GEM >3 PRO")
         
-        # FEATURE 1: System Prompt (Personality)
         st.subheader("🧠 Neural Tuning")
         sys_prompt = st.text_area("System Instructions", 
             value="You are GEM >3, a futuristic AI. Be helpful, concise, and slightly witty.",
@@ -52,13 +56,13 @@ if check_password():
         
         st.divider()
         uploaded_file = st.file_uploader("Visual Input", type=["jpg", "png", "jpeg"])
-        if uploaded_file: st.image(uploaded_file, width='stretch')
+        if uploaded_file: 
+            st.image(uploaded_file, use_container_width=True)
         
         st.divider()
         token_display = st.empty()
         token_display.metric("Total Usage", f"{st.session_state.total_tokens:,} tokens")
         
-        # FEATURE 2: Export Chat
         if st.session_state.messages:
             chat_json = json.dumps(st.session_state.messages, indent=2)
             st.download_button("📂 Export Logs", data=chat_json, file_name="gem3_logs.json", mime="application/json")
@@ -68,93 +72,48 @@ if check_password():
             st.session_state.total_tokens = 0
             st.rerun()
 
-    # --- 4. CHAT INTERFACE ---
-    for msg in st.session_state.messages:
-        avatar = "🤖" if msg["role"] == "assistant" else "👤"
-        with st.chat_message(msg["role"], avatar=avatar):
-            st.markdown(msg["content"])
-
-    if prompt := st.chat_input("Command GEM >3..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user", avatar="👤"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant", avatar="🤖"):
-            # Use 'status' for modern loading
-            with st.status("GEM >3 is processing...", expanded=False) as status:
-                try:
-                    # Model Fallback Logic (2026 Stable)
-                    try:
-                        model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=sys_prompt)
-                    except:
-                        model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=sys_prompt)
-                    
-                    content = [prompt, Image.open(uploaded_file)] if uploaded_file else [prompt]
-                    
-                    # FEATURE 3: STREAMING
-                    placeholder = st.empty()
-                    full_response = ""
-                    
-                    # Generate with stream=True
-                    response = model.generate_content(content, stream=True)
-                    
-                    for chunk in response:
-                        full_response += chunk.text
-                        placeholder.markdown(full_response + "▌") # Typing cursor effect
-                    
-                    placeholder.markdown(full_response) # Final clean render
-                    
-                    # Token Update
-                    usage = response.usage_metadata
-                    st.session_state.total_tokens += usage.total_token_count
-                    token_display.metric("Total Usage", f"{st.session_state.total_tokens:,} tokens")
-                    status.update(label=f"Done (+{usage.total_token_count} tokens)", state="complete")
-                    
-                    st.session_state.messages.append({"role": "assistant", "content": full_response})
-
-                except Exception as e:
-                    status.update(label="System Error", state="error")
-                    st.error(f"Error: {e}")
-# --- 4. CHAT INTERFACE ---
-if st.session_state.password_correct:
-    
-    # 1. DEFINE MODEL HERE (Available to the whole block)
+    # --- 4. MODEL & CHAT INITIALIZATION ---
+    # Define model and chat session OUTSIDE the chat_input block to avoid NameErrors
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=sys_prompt)
+        model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_prompt)
     except:
+        # Fallback to 1.5 if 2.0 isn't available in your region yet
         model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=sys_prompt)
 
-    # 2. Map History
-    history = [
+    # Format history for the Gemini API
+    # Gemini uses 'model' instead of 'assistant'
+    api_history = [
         {"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]}
         for m in st.session_state.messages
     ]
+    
+    chat_session = model.start_chat(history=api_history)
 
-    # 3. Start Chat Session
-    chat_session = model.start_chat(history=history)
-
-    # 4. Display existing messages
+    # --- 5. CHAT INTERFACE ---
+    # Display historical messages
     for msg in st.session_state.messages:
         avatar = "🤖" if msg["role"] == "assistant" else "👤"
         with st.chat_message(msg["role"], avatar=avatar):
             st.markdown(msg["content"])
 
-    # 5. Handle new input
+    # Handle new user input
     if prompt := st.chat_input("Command GEM >3..."):
+        # Add user message to UI
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
 
+        # Generate Assistant Response
         with st.chat_message("assistant", avatar="🤖"):
             with st.status("GEM >3 is processing...", expanded=False) as status:
                 try:
-                    # Prepare content (Prompt + Image if exists)
-                    content = [prompt, Image.open(uploaded_file)] if uploaded_file else prompt
+                    # Include image in the content list if uploaded
+                    content = [prompt, Image.open(uploaded_file)] if uploaded_file else [prompt]
                     
                     placeholder = st.empty()
                     full_response = ""
                     
-                    # Use the chat_session we initialized above
+                    # Stream the response
                     response = chat_session.send_message(content, stream=True)
                     
                     for chunk in response:
@@ -164,14 +123,15 @@ if st.session_state.password_correct:
                     
                     placeholder.markdown(full_response)
                     
-                    # Usage metrics
+                    # Update usage metrics
                     usage = response.usage_metadata
                     st.session_state.total_tokens += usage.total_token_count
                     token_display.metric("Total Usage", f"{st.session_state.total_tokens:,} tokens")
                     status.update(label=f"Done (+{usage.total_token_count} tokens)", state="complete")
                     
+                    # Save assistant message to history
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
 
                 except Exception as e:
                     status.update(label="System Error", state="error")
-                    st.error(f"Error: {e}")
+                    st.error(f"Error: {str(e)}")
