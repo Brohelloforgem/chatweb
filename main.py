@@ -115,3 +115,55 @@ if check_password():
                 except Exception as e:
                     status.update(label="System Error", state="error")
                     st.error(f"Error: {e}")
+# --- 4. CHAT INTERFACE (WITH MEMORY) ---
+# Convert session history to Google's format: 'user' -> 'user', 'assistant' -> 'model'
+history = [
+    {"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]}
+    for m in st.session_state.messages
+]
+
+# Initialize the chat session
+chat_session = model.start_chat(history=history)
+
+# Display Chat History
+for msg in st.session_state.messages:
+    avatar = "🤖" if msg["role"] == "assistant" else "👤"
+    with st.chat_message(msg["role"], avatar=avatar):
+        st.markdown(msg["content"])
+
+if prompt := st.chat_input("Command GEM >3..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant", avatar="🤖"):
+        with st.status("GEM >3 is processing...", expanded=False) as status:
+            try:
+                # Prepare content: include image only on the first message of a turn
+                content = [prompt, Image.open(uploaded_file)] if uploaded_file else prompt
+                
+                placeholder = st.empty()
+                full_response = ""
+                
+                # Use chat_session.send_message for multi-turn memory
+                response = chat_session.send_message(content, stream=True)
+                
+                for chunk in response:
+                    # Safety check: ensure the chunk actually has text
+                    if chunk.candidates[0].content.parts:
+                        full_response += chunk.text
+                        placeholder.markdown(full_response + "▌")
+                
+                placeholder.markdown(full_response)
+                
+                # Token Update (Handle potential missing metadata in stream)
+                usage = response.usage_metadata
+                st.session_state.total_tokens += usage.total_token_count
+                token_display.metric("Total Usage", f"{st.session_state.total_tokens:,} tokens")
+                status.update(label=f"Done (+{usage.total_token_count} tokens)", state="complete")
+                
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+            except Exception as e:
+                status.update(label="System Error", state="error")
+                st.error(f"Error: {e}")
