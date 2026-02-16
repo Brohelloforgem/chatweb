@@ -78,7 +78,7 @@ if check_password():
             with st.status("GEM >3 is thinking...", expanded=False) as status:
                 try:
                     # Stable 2026 Model Choice
-                    model = genai.GenerativeModel('gemini-2.0-flash')
+                    model = genai.GenerativeModel('gemini-2.5-flash')
                     
                     content = [prompt, Image.open(uploaded_file)] if uploaded_file else [prompt]
                     response = model.generate_content(content)
