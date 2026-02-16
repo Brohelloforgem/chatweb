@@ -4,16 +4,19 @@ from PIL import Image
 import os
 import json
 import base64
+import requests
 from io import BytesIO
 from dotenv import load_dotenv
 
 # --- 1. CONFIG & STYLING ---
-st.set_page_config(page_title="GEM >3", layout="wide")
+st.set_page_config(page_title="GEM >3 (OpenRouter)", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; }
-    .stChatMessage { border-radius: 15px; border: 1px solid #30363d; background-color: #161b22; }
+    .main { background-color: #0e1117; color: #e6edf3; }
+    .stChatMessage { border-radius: 15px; border: 1px solid #30363d; background-color: #161b22; margin-bottom: 10px; }
+    .stChatInput { border-color: #30363d !important; }
+    .st-emotion-cache-pf561s { color: #00d4ff !important; text-shadow: 0 0 10px #00d4ff; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -23,14 +26,14 @@ def check_password():
         st.session_state.password_correct = False
     if st.session_state.password_correct: return True
 
-    st.title("💠 OPENROUTER SECURE LINK")
-    pwd = st.text_input("Enter Access Key", type="password")
-    if st.button("Initialize"):
+    st.title("💠 NEURAL LINK SECURE LOGIN")
+    pwd = st.text_input("Access Key", type="password")
+    if st.button("Initialize Neural Link"):
         if pwd == st.secrets.get("APP_PASSWORD", "admin"):
             st.session_state.password_correct = True
             st.rerun()
         else:
-            st.error("Denied.")
+            st.error("Access Denied.")
     return False
 
 # --- 3. HELPER FUNCTIONS ---
@@ -39,71 +42,100 @@ def encode_image(image):
     image.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
+@st.cache_data(ttl=3600)  # Refresh model list every hour
+def get_openrouter_models(api_key):
+    try:
+        response = requests.get(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"}
+        )
+        if response.status_code == 200:
+            data = response.json().get('data', [])
+            # Filter for models that are either free or commonly used
+            return [m['id'] for m in data]
+        return ["google/gemini-2.0-flash-lite:preview:free", "meta-llama/llama-3.1-8b-instruct:free"]
+    except:
+        return ["google/gemini-2.0-flash-lite:preview:free"]
+
+# --- 4. SESSION INITIALIZATION ---
 if "messages" not in st.session_state: st.session_state.messages = []
+if "total_tokens" not in st.session_state: st.session_state.total_tokens = 0
 
 if check_password():
     load_dotenv()
+    OR_API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
     
-    # Initialize OpenRouter Client
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key=os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY"),
+        api_key=OR_API_KEY,
     )
 
+    # --- SIDEBAR ---
     with st.sidebar:
         st.title("💠 GEM >3 PRO")
         
-        # OpenRouter lets you switch models easily!
-        selected_model = st.selectbox("Select Neural Engine", [
-            "google/gemini-2.0-flash-lite:free", 
-            "google/gemini-2.0-flash",
-            "anthropic/claude-3-haiku",
-            "meta-llama/llama-3.1-8b-instruct:free"
-        ])
+        st.subheader("⚙️ Engine Configuration")
+        available_models = get_openrouter_models(OR_API_KEY)
         
-        sys_prompt = st.text_area("System Instructions", value="You are GEM >3, a witty AI.")
+        # Priority Free models first for easier selection
+        default_models = [m for m in available_models if ":free" in m] + [m for m in available_models if ":free" not in m]
+        
+        selected_model = st.selectbox("Neural Engine", default_models, index=0)
+        
+        sys_prompt = st.text_area("System Instructions", 
+            value="You are GEM >3, a futuristic AI. Be helpful, concise, and slightly witty.",
+            help="Define the bot's personality.")
+        
+        st.divider()
         uploaded_file = st.file_uploader("Visual Input", type=["jpg", "png", "jpeg"])
+        if uploaded_file: st.image(uploaded_file, use_container_width=True)
         
-        if st.button("🗑️ Reset Chat"):
+        st.divider()
+        st.metric("Session Activity", f"{len(st.session_state.messages)} messages")
+        
+        if st.button("🗑️ Reset Link"):
             st.session_state.messages = []
             st.rerun()
 
-    # --- 4. CHAT INTERFACE ---
+    # --- 5. CHAT INTERFACE ---
+    # Display message history
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
+        role = "assistant" if msg["role"] == "assistant" else "user"
+        avatar = "🤖" if role == "assistant" else "👤"
+        with st.chat_message(role, avatar=avatar):
             st.markdown(msg["content"])
 
+    # Chat Input
     if prompt := st.chat_input("Command GEM >3..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
+        with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
 
-        with st.chat_message("assistant"):
+        with st.chat_message("assistant", avatar="🤖"):
             with st.status("Routing through OpenRouter...", expanded=False) as status:
                 try:
-                    # Prepare messages with system prompt
-                    messages = [{"role": "system", "content": sys_prompt}]
-                    
-                    # Add history
+                    # Construct Message Payload
+                    chat_history = [{"role": "system", "content": sys_prompt}]
                     for m in st.session_state.messages:
-                        messages.append({"role": m["role"], "content": m["content"]})
+                        chat_history.append({"role": m["role"], "content": m["content"]})
                     
-                    # Handle Vision if image is present (Advanced mode)
-                    if uploaded_file and len(st.session_state.messages) == 1:
+                    # Handle Image Attachment (Only for the latest message if image exists)
+                    if uploaded_file:
                         base64_image = encode_image(Image.open(uploaded_file))
-                        messages[-1]["content"] = [
+                        # Transform the last user message into a multimodal format
+                        chat_history[-1]["content"] = [
                             {"type": "text", "text": prompt},
                             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                         ]
 
-                    # Call OpenRouter
+                    # API Call
                     response = client.chat.completions.create(
                         model=selected_model,
-                        messages=messages,
+                        messages=chat_history,
                         stream=True,
                         extra_headers={
-                            "HTTP-Referer": "http://localhost:8501", # Optional for rankings
-                            "X-Title": "Gemini Streamlit App",
+                            "HTTP-Referer": "http://localhost:8501", 
+                            "X-Title": "GEM-3-Pro-Streamlit",
                         }
                     )
 
@@ -116,8 +148,8 @@ if check_password():
                     
                     placeholder.markdown(full_response)
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
-                    status.update(label="Transmission Complete", state="complete")
+                    status.update(label="Transmission Successful", state="complete")
 
                 except Exception as e:
-                    st.error(f"API Error: {e}")
-                    status.update(label="Error", state="error")
+                    status.update(label="Routing Error", state="error")
+                    st.error(f"Error: {str(e)}")
