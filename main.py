@@ -15,7 +15,7 @@ import uuid
 # ============================================================
 
 st.set_page_config(
-    page_title="GEM >3 PRO (FREE MODELS)",
+    page_title="GEM >3 PRO (FREE)",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -36,10 +36,7 @@ st.markdown("""
     border-radius: 12px;
     border: 1px solid #30363d;
     background-color: #161b22;
-}
-
-.copy-btn {
-    font-size: 12px;
+    padding: 10px;
 }
 
 </style>
@@ -55,7 +52,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUT
 APP_PASSWORD = os.getenv("APP_PASSWORD") or st.secrets.get("APP_PASSWORD", "admin")
 
 # ============================================================
-# PASSWORD PROTECTION
+# PASSWORD
 # ============================================================
 
 def check_password():
@@ -68,17 +65,15 @@ def check_password():
 
     st.title("🔐 GEM >3 Secure Access")
 
-    pwd = st.text_input("Access Key", type="password")
+    pwd = st.text_input("Password", type="password")
 
-    if st.button("Connect"):
+    if st.button("Login"):
 
         if pwd == APP_PASSWORD:
-
             st.session_state.password_correct = True
             st.rerun()
 
         else:
-
             st.error("Incorrect password")
 
     return False
@@ -88,7 +83,7 @@ if not check_password():
     st.stop()
 
 # ============================================================
-# OPENROUTER CLIENT
+# CLIENT
 # ============================================================
 
 client = OpenAI(
@@ -97,7 +92,7 @@ client = OpenAI(
 )
 
 # ============================================================
-# SESSION STATE INIT
+# SESSION STATE
 # ============================================================
 
 if "messages" not in st.session_state:
@@ -110,7 +105,7 @@ if "uploaded_image" not in st.session_state:
     st.session_state.uploaded_image = None
 
 # ============================================================
-# FREE MODEL FETCH
+# FETCH FREE MODELS ONLY
 # ============================================================
 
 @st.cache_data(ttl=3600)
@@ -125,23 +120,22 @@ def get_free_models(api_key):
 
         data = r.json()["data"]
 
-        free_models = [
-            model["id"]
-            for model in data
-            if ":free" in model["id"]
+        free = [
+            m["id"]
+            for m in data
+            if ":free" in m["id"]
         ]
 
-        free_models.sort()
+        free.sort()
 
-        return free_models
+        return free
 
     except:
 
         return [
             "google/gemini-2.0-flash-lite:preview:free",
-            "meta-llama/llama-3.1-8b-instruct:free",
             "deepseek/deepseek-chat:free",
-            "mistralai/mistral-7b-instruct:free"
+            "meta-llama/llama-3.1-8b-instruct:free"
         ]
 
 # ============================================================
@@ -151,21 +145,9 @@ def get_free_models(api_key):
 def encode_image(image):
 
     buffer = BytesIO()
-
     image.save(buffer, format="PNG")
 
     return base64.b64encode(buffer.getvalue()).decode()
-
-
-def update_memory(user, assistant):
-
-    st.session_state.memory.append({
-        "user": user,
-        "assistant": assistant
-    })
-
-    if len(st.session_state.memory) > 20:
-        st.session_state.memory.pop(0)
 
 
 def build_memory():
@@ -180,6 +162,17 @@ def build_memory():
     return text
 
 
+def update_memory(user, assistant):
+
+    st.session_state.memory.append({
+        "user": user,
+        "assistant": assistant
+    })
+
+    if len(st.session_state.memory) > 20:
+        st.session_state.memory.pop(0)
+
+
 def export_json():
 
     return json.dumps(st.session_state.messages, indent=2)
@@ -190,7 +183,6 @@ def export_txt():
     text = ""
 
     for m in st.session_state.messages:
-
         text += f"{m['role']}: {m['content']}\n\n"
 
     return text
@@ -228,17 +220,10 @@ with st.sidebar:
 
     free_models = get_free_models(OPENROUTER_API_KEY)
 
-    if not free_models:
-
-        st.error("No free models available")
-        st.stop()
-
     selected_model = st.selectbox(
         "Free Model",
         free_models
     )
-
-    st.success("100% Free Model")
 
     temperature = st.slider(
         "Creativity",
@@ -269,20 +254,12 @@ with st.sidebar:
         st.image(st.session_state.uploaded_image)
 
         if st.button("Clear Image"):
+
             st.session_state.uploaded_image = None
             st.rerun()
 
-    st.download_button(
-        "Export JSON",
-        export_json(),
-        "chat.json"
-    )
-
-    st.download_button(
-        "Export TXT",
-        export_txt(),
-        "chat.txt"
-    )
+    st.download_button("Export JSON", export_json(), "chat.json")
+    st.download_button("Export TXT", export_txt(), "chat.txt")
 
     if st.button("Reset Chat"):
 
@@ -290,6 +267,23 @@ with st.sidebar:
         st.session_state.memory = []
 
         st.rerun()
+
+# ============================================================
+# AUTO SWITCH TO GEMINI IF IMAGE
+# ============================================================
+
+if st.session_state.uploaded_image:
+
+    gemini_models = [
+        m for m in free_models
+        if "gemini" in m.lower()
+    ]
+
+    if gemini_models and "gemini" not in selected_model.lower():
+
+        selected_model = gemini_models[0]
+
+        st.sidebar.success(f"Vision enabled: {selected_model}")
 
 # ============================================================
 # DISPLAY CHAT
@@ -333,7 +327,7 @@ if voice_prompt:
     prompt = voice_prompt
 
 # ============================================================
-# RESPONSE GENERATION
+# RESPONSE
 # ============================================================
 
 if prompt:
@@ -341,7 +335,6 @@ if prompt:
     if ":free" not in selected_model:
 
         st.error("Only free models allowed")
-
         st.stop()
 
     st.session_state.messages.append({
@@ -368,31 +361,68 @@ if prompt:
         for m in st.session_state.messages:
             messages.append(m)
 
+        # IMAGE SUPPORT
         if st.session_state.uploaded_image and "gemini" in selected_model.lower():
 
             img = Image.open(st.session_state.uploaded_image)
 
             b64 = encode_image(img)
 
-         # IMAGE SUPPORT (Gemini free only)
-if st.session_state.uploaded_image and "gemini" in selected_model.lower():
-
-    img = Image.open(st.session_state.uploaded_image)
-
-    b64 = encode_image(img)
-
-    messages[-1] = {
-        "role": "user",
-        "content": [
-            {
-                "type": "text",
-                "text": prompt
-            },
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/png;base64,{b64}"
-                }
+            messages[-1] = {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{b64}"
+                        }
+                    }
+                ]
             }
-        ]
-    }
+
+        try:
+
+            response = client.chat.completions.create(
+
+                model=selected_model,
+
+                messages=messages,
+
+                temperature=temperature,
+
+                max_tokens=max_tokens,
+
+                stream=True,
+
+                extra_headers={
+                    "HTTP-Referer": "https://your-app.streamlit.app",
+                    "X-Title": "GEM-3-PRO"
+                }
+            )
+
+            for chunk in response:
+
+                delta = chunk.choices[0].delta
+
+                if delta and getattr(delta, "content", None):
+
+                    full += delta.content
+
+                    placeholder.markdown(full + "▌")
+
+                    time.sleep(0.01)
+
+            placeholder.markdown(full)
+
+        except Exception as e:
+
+            st.error(str(e))
+            st.stop()
+
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": full
+        })
+
+        update_memory(prompt, full)
