@@ -50,13 +50,6 @@ if check_password():
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Chat Input
-    if prompt := st.chat_input("Ask me about the image or just chat..."):
-        # Store user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
         # Generate Response
         with st.chat_message("assistant"):
             try:
