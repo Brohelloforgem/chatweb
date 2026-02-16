@@ -38,8 +38,8 @@ def check_password():
 # --- 2. MAIN APP LOGIC ---
 if check_password():
     st.set_page_config(page_title="Private Vision AI", layout="wide")
-    st.title("🤖 Private Vision Chatbot")
-    st.caption("Powered by Gemini 3 Flash | Password Protected")
+    st.title("GEM >3")
+    st.caption("Powered by Gemini 2.5 Flash | Password Protected")
 
     # Sidebar for Image Upload
     with st.sidebar:
@@ -68,7 +68,7 @@ if check_password():
         with st.chat_message("assistant"):
             try:
                 # Use Gemini 3 Flash for the best free-tier performance
-                model = genai.GenerativeModel('gemini-3-flash')
+                model = genai.GenerativeModel('gemini-2.5-flash')
                 
                 if uploaded_file:
                     img = Image.open(uploaded_file)
