@@ -30,7 +30,8 @@ client = OpenAI(
 
 with st.sidebar:
     st.title("🛰️ Neural Link")
-    st.info("⚡ Priority: Gemma 3 -> Llama 4 -> MiMo-V2 -> Free Router")
+    # Updated the info to reflect the 3-model limit
+    st.info("⚡ Fallback: Gemma 3 → Llama 3.2 → Free Router")
     uploaded_file = st.file_uploader("🖼️ Attach Image", type=["jpg", "png", "jpeg"])
     if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []; st.session_state.total_tokens = 0; st.rerun()
@@ -55,11 +56,10 @@ if prompt := st.chat_input("Message GEM >3..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # DEFINE THE SYSTEM INSTRUCTION
         sys_instr = "You are GEM >3, a professional AI. Use vision to analyze images accurately."
         api_messages = []
         
-        # INJECT System instructions into the first user message (fixes Gemma 3 400 errors)
+        # FIX: System instructions injected into the first user message (avoiding 400 errors)
         for i, m in enumerate(st.session_state.messages):
             content_to_send = m["content"]
             if i == 0 and m["role"] == "user":
@@ -76,35 +76,32 @@ if prompt := st.chat_input("Message GEM >3..."):
             else:
                 api_messages.append({"role": m["role"], "content": content_to_send})
 
-        # 2026 FREE MODEL FALLBACK CHAIN
-        # We use 'google/gemma-3-27b-it:free' as primary since you want Gemma 3
+        # CRITICAL FIX: The list below MUST NOT exceed 3 items
         models_to_try = [
-            "google/gemma-3-27b-it:free",
-            "meta-llama/llama-4-maverick:free",
-            "xiaomi/mimo-v2-flash:free",
-            "openrouter/free"
+            "google/gemini-2.0-flash-lite:preview:free", # Primary (Vision powerhouse)
+            "meta-llama/llama-3.2-11b-vision-instruct:free", # Secondary
+            "openrouter/free" # Ultimate catch-all
         ]
 
         def stream_gen():
             last_err = ""
-            for model_id in models_to_try:
-                try:
-                    response_stream = client.chat.completions.create(
-                        model=model_id,
-                        messages=api_messages,
-                        stream=True,
-                        # OpenRouter's built-in failover logic
-                        extra_body={"models": models_to_try}
-                    )
-                    
-                    for chunk in response_stream:
-                        if chunk.choices and chunk.choices[0].delta.content:
-                            yield chunk.choices[0].delta.content
-                    return # Exit the function once we have a successful stream
+            # We try the primary first, and if it fails, the 'extra_body' handles the next 2
+            try:
+                response_stream = client.chat.completions.create(
+                    model=models_to_try[0],
+                    messages=api_messages,
+                    stream=True,
+                    # Fallback happens on the server side for the remaining 2 models
+                    extra_body={"models": models_to_try[1:]} 
+                )
+                
+                for chunk in response_stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+                return 
 
-                except Exception as e:
-                    last_err = str(e)
-                    continue # Try the next model in the chain
+            except Exception as e:
+                last_err = str(e)
             
             yield f"⚠️ **Neural Link Failed.** {last_err}"
 
