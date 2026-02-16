@@ -40,14 +40,7 @@ if check_password():
     st.set_page_config(page_title="Private Vision AI", layout="wide")
     st.title("GEM >3")
     st.caption("Powered by Gemini 2.5 Flash | Password Protected")
-
-    # Sidebar for Image Upload
-    with st.sidebar:
-        st.header("🖼️ Image Analysis")
-        uploaded_file = st.file_uploader("Upload an image to discuss", type=["jpg", "jpeg", "png"])
-        if uploaded_file:
-            st.image(uploaded_file, caption="Target Image", use_container_width=True)
-
+    
     # Initialize Chat History
     if "messages" not in st.session_state:
         st.session_state.messages = []
