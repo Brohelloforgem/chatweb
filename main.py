@@ -1,109 +1,155 @@
 import streamlit as st
 from openai import OpenAI
 from PIL import Image
-import os, base64, requests, json
+import os
+import json
+import base64
+import requests
 from io import BytesIO
 from dotenv import load_dotenv
 
-# --- 1. CONFIG ---
-st.set_page_config(page_title="GEM >3 Ultimate", layout="centered")
+# --- 1. CONFIG & STYLING ---
+st.set_page_config(page_title="GEM >3 (OpenRouter)", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. SESSION INITIALIZATION ---
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; color: #e6edf3; }
+    .stChatMessage { border-radius: 15px; border: 1px solid #30363d; background-color: #161b22; margin-bottom: 10px; }
+    .stChatInput { border-color: #30363d !important; }
+    .st-emotion-cache-pf561s { color: #00d4ff !important; text-shadow: 0 0 10px #00d4ff; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. SECURITY ---
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+    if st.session_state.password_correct: return True
+
+    st.title("💠 NEURAL LINK SECURE LOGIN")
+    pwd = st.text_input("Access Key", type="password")
+    if st.button("Initialize Neural Link"):
+        if pwd == st.secrets.get("APP_PASSWORD", "admin"):
+            st.session_state.password_correct = True
+            st.rerun()
+        else:
+            st.error("Access Denied.")
+    return False
+
+# --- 3. HELPER FUNCTIONS ---
+def encode_image(image):
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+@st.cache_data(ttl=3600)  # Refresh model list every hour
+def get_openrouter_models(api_key):
+    try:
+        response = requests.get(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"}
+        )
+        if response.status_code == 200:
+            data = response.json().get('data', [])
+            # Filter for models that are either free or commonly used
+            return [m['id'] for m in data]
+        return ["google/gemini-2.0-flash-lite:preview:free", "meta-llama/llama-3.1-8b-instruct:free"]
+    except:
+        return ["google/gemini-2.0-flash-lite:preview:free"]
+
+# --- 4. SESSION INITIALIZATION ---
 if "messages" not in st.session_state: st.session_state.messages = []
 if "total_tokens" not in st.session_state: st.session_state.total_tokens = 0
 
-# --- 3. HELPER FUNCTIONS ---
-def encode_image(img):
-    img = img.convert("RGB")
-    buf = BytesIO()
-    img.save(buf, format="JPEG")
-    return base64.b64encode(buf.getvalue()).decode('utf-8')
-
-# --- 4. AUTH & CLIENT ---
-load_dotenv()
-api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1", 
-    api_key=api_key,
-    default_headers={"HTTP-Referer": "http://localhost:8501", "X-Title": "GEM-3-Ultimate"}
-)
-
-with st.sidebar:
-    st.title("🛰️ Neural Link")
-    # Updated the info to reflect the 3-model limit
-    st.info("⚡ Fallback: Gemma 3 → Llama 3.2 → Free Router")
-    uploaded_file = st.file_uploader("🖼️ Attach Image", type=["jpg", "png", "jpeg"])
-    if st.button("🗑️ Clear Chat"):
-        st.session_state.messages = []; st.session_state.total_tokens = 0; st.rerun()
-
-# --- 5. CHAT DISPLAY ---
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        if "image_b64" in m:
-            st.image(f"data:image/jpeg;base64,{m['image_b64']}", use_container_width=True)
-        st.markdown(m["content"])
-
-# --- 6. SMART INPUT & SYSTEM ROLE INJECTION ---
-if prompt := st.chat_input("Message GEM >3..."):
-    user_msg = {"role": "user", "content": prompt}
-    if uploaded_file:
-        user_msg["image_b64"] = encode_image(Image.open(uploaded_file))
-    st.session_state.messages.append(user_msg)
+if check_password():
+    load_dotenv()
+    OR_API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
     
-    with st.chat_message("user"):
-        if "image_b64" in user_msg:
-            st.image(f"data:image/jpeg;base64,{user_msg['image_b64']}", use_container_width=True)
-        st.markdown(prompt)
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OR_API_KEY,
+    )
 
-    with st.chat_message("assistant"):
-        sys_instr = "You are GEM >3, a professional AI. Use vision to analyze images accurately."
-        api_messages = []
+    # --- SIDEBAR ---
+    with st.sidebar:
+        st.title("💠 GEM >3 PRO")
         
-        # FIX: System instructions injected into the first user message (avoiding 400 errors)
-        for i, m in enumerate(st.session_state.messages):
-            content_to_send = m["content"]
-            if i == 0 and m["role"] == "user":
-                content_to_send = f"SYSTEM INSTRUCTIONS: {sys_instr}\n\nUSER PROMPT: {m['content']}"
+        st.subheader("⚙️ Engine Configuration")
+        available_models = get_openrouter_models(OR_API_KEY)
+        
+        # Priority Free models first for easier selection
+        default_models = [m for m in available_models if ":free" in m] + [m for m in available_models if ":free" not in m]
+        
+        selected_model = st.selectbox("Neural Engine", default_models, index=0)
+        
+        sys_prompt = st.text_area("System Instructions", 
+            value="You are GEM >3, a futuristic AI. Be helpful, concise, and slightly witty.",
+            help="Define the bot's personality.")
+        
+        st.divider()
+        uploaded_file = st.file_uploader("Visual Input", type=["jpg", "png", "jpeg"])
+        if uploaded_file: st.image(uploaded_file, use_container_width=True)
+        
+        st.divider()
+        st.metric("Session Activity", f"{len(st.session_state.messages)} messages")
+        
+        if st.button("🗑️ Reset Link"):
+            st.session_state.messages = []
+            st.rerun()
 
-            if "image_b64" in m:
-                api_messages.append({
-                    "role": m["role"],
-                    "content": [
-                        {"type": "text", "text": content_to_send},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{m['image_b64']}"}}
-                    ]
-                })
-            else:
-                api_messages.append({"role": m["role"], "content": content_to_send})
+    # --- 5. CHAT INTERFACE ---
+    # Display message history
+    for msg in st.session_state.messages:
+        role = "assistant" if msg["role"] == "assistant" else "user"
+        avatar = "🤖" if role == "assistant" else "👤"
+        with st.chat_message(role, avatar=avatar):
+            st.markdown(msg["content"])
 
-        # CRITICAL FIX: The list below MUST NOT exceed 3 items
-        models_to_try = [
-            "google/gemini-2.0-flash-lite:preview:free", # Primary (Vision powerhouse)
-            "meta-llama/llama-3.2-11b-vision-instruct:free", # Secondary
-            "openrouter/free" # Ultimate catch-all
-        ]
+    # Chat Input
+    if prompt := st.chat_input("Command GEM >3..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user", avatar="👤"):
+            st.markdown(prompt)
 
-        def stream_gen():
-            last_err = ""
-            # We try the primary first, and if it fails, the 'extra_body' handles the next 2
-            try:
-                response_stream = client.chat.completions.create(
-                    model=models_to_try[0],
-                    messages=api_messages,
-                    stream=True,
-                    # Fallback happens on the server side for the remaining 2 models
-                    extra_body={"models": models_to_try[1:]} 
-                )
-                
-                for chunk in response_stream:
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        yield chunk.choices[0].delta.content
-                return 
+        with st.chat_message("assistant", avatar="🤖"):
+            with st.status("Routing through OpenRouter...", expanded=False) as status:
+                try:
+                    # Construct Message Payload
+                    chat_history = [{"role": "system", "content": sys_prompt}]
+                    for m in st.session_state.messages:
+                        chat_history.append({"role": m["role"], "content": m["content"]})
+                    
+                    # Handle Image Attachment (Only for the latest message if image exists)
+                    if uploaded_file:
+                        base64_image = encode_image(Image.open(uploaded_file))
+                        # Transform the last user message into a multimodal format
+                        chat_history[-1]["content"] = [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
+                        ]
 
-            except Exception as e:
-                last_err = str(e)
-            
-            yield f"⚠️ **Neural Link Failed.** {last_err}"
+                    # API Call
+                    response = client.chat.completions.create(
+                        model=selected_model,
+                        messages=chat_history,
+                        stream=True,
+                        extra_headers={
+                            "HTTP-Referer": "http://localhost:8501", 
+                            "X-Title": "GEM-3-Pro-Streamlit",
+                        }
+                    )
 
-        full_res = st.write_stream(stream_gen())
-        st.session_state.messages.append({"role": "assistant", "content": full_res})
+                    placeholder = st.empty()
+                    full_response = ""
+                    for chunk in response:
+                        if chunk.choices[0].delta.content:
+                            full_response += chunk.choices[0].delta.content
+                            placeholder.markdown(full_response + "▌")
+                    
+                    placeholder.markdown(full_response)
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    status.update(label="Transmission Successful", state="complete")
+
+                except Exception as e:
+                    status.update(label="Routing Error", state="error")
+                    st.error(f"Error: {str(e)}")
