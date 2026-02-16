@@ -4,80 +4,98 @@ from PIL import Image
 import os
 from dotenv import load_dotenv
 
+# --- 1. CONFIG & THEME ---
 load_dotenv()
+st.set_page_config(page_title="GEM >3", layout="wide", initial_sidebar_state="expanded")
 
-# --- SECURITY CHECK ---
+# Custom CSS for that "GEM >3" futuristic glow
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; }
+    .stChatMessage { border-radius: 15px; margin-bottom: 10px; border: 1px solid #30363d; }
+    .st-emotion-cache-1c7n2ka { color: #00d4ff; font-weight: bold; } /* Bot Name Glow */
+    </style>
+    """, unsafe_allow_code=True)
+
+# --- 2. SECURITY ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
-    if st.session_state.password_correct:
-        return True
+    if st.session_state.password_correct: return True
 
-    st.title("🔐 Secure Chat Access")
-    pwd_input = st.text_input("Enter App Password", type="password")
-    if st.button("Unlock"):
-        # Accessing secrets safely
-        if pwd_input == st.secrets.get("APP_PASSWORD", "admin"):
+    st.title("🔐 GEM >3 ACCESS")
+    pwd = st.text_input("Security Key", type="password")
+    if st.button("Unlock System"):
+        if pwd == st.secrets.get("APP_PASSWORD", "admin"):
             st.session_state.password_correct = True
             st.rerun()
         else:
-            st.error("🚫 Incorrect password")
+            st.error("Invalid Key.")
     return False
 
 if check_password():
-    # Set config FIRST
-    st.set_page_config(page_title="AI Vision + Token Tracker", layout="wide")
-    
-    # Configure API
+    # Setup API
     api_key = os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
     genai.configure(api_key=api_key)
 
-    # Sidebar
+    # --- 3. SIDEBAR UI ---
     with st.sidebar:
-        st.header("⚙️ Controls")
-        uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
-        if uploaded_file:
-            # FIX: Updated width parameter for 2026 Streamlit standards
-            st.image(uploaded_file, width='stretch') 
+        st.title("💠 GEM >3")
+        st.caption("v2.6 Stable Build")
+        
+        # New 2026 Logo Component
+        st.logo("https://cdn-icons-png.flaticon.com/512/2103/2103633.png", icon_image="https://cdn-icons-png.flaticon.com/512/2103/2103633.png")
         
         st.divider()
-        st.subheader("📊 Token Usage")
-        token_container = st.container()
+        uploaded_file = st.file_uploader("Drop Image for Vision Analysis", type=["jpg", "png", "jpeg"])
+        if uploaded_file:
+            st.image(uploaded_file, width='stretch')
+        
+        st.divider()
+        st.subheader("📊 Session Telemetry")
+        if "total_tokens" not in st.session_state: st.session_state.total_tokens = 0
+        st.metric("Tokens Consumed", f"{st.session_state.total_tokens:,}")
+        
+        if st.button("🗑️ Clear Neural Link (Reset)"):
+            st.session_state.messages = []
+            st.session_state.total_tokens = 0
+            st.rerun()
 
+    # --- 4. CHAT INTERFACE ---
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "total_tokens" not in st.session_state:
-        st.session_state.total_tokens = 0
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Display Chat History
+    for msg in st.session_state.messages:
+        avatar = "🤖" if msg["role"] == "assistant" else "👤"
+        with st.chat_message(msg["role"], avatar=avatar):
+            st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Ask me something..."):
+    # Chat Input
+    if prompt := st.chat_input("Command GEM >3..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
+        with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
 
-        with st.chat_message("assistant"):
-            # FIX: Using the widely supported stable model name
-            model = genai.GenerativeModel('gemini-1.5-flash') 
-            
-            content = [prompt, Image.open(uploaded_file)] if uploaded_file else [prompt]
-            
-            try:
-                response = model.generate_content(content)
-                ans = response.text
-                usage = response.usage_metadata
-                
-                st.markdown(ans)
-                st.session_state.messages.append({"role": "assistant", "content": ans})
-                st.session_state.total_tokens += usage.total_token_count
+        with st.chat_message("assistant", avatar="🤖"):
+            # Use 'status' for a 2026-style thinking indicator
+            with st.status("GEM >3 is processing...", expanded=False) as status:
+                try:
+                    # UPDATED: gemini-2.0-flash is the stable 2026 standard
+                    model = genai.GenerativeModel('gemini-2.0-flash')
+                    
+                    content = [prompt, Image.open(uploaded_file)] if uploaded_file else [prompt]
+                    response = model.generate_content(content)
+                    
+                    full_res = response.text
+                    tokens = response.usage_metadata.total_token_count
+                    
+                    st.session_state.total_tokens += tokens
+                    status.update(label=f"Analysis Complete (+{tokens} tokens)", state="complete")
+                except Exception as e:
+                    status.update(label="System Error", state="error")
+                    st.error(f"Neural Link Failed: {e}")
+                    full_res = "Critical Failure. Check Logs."
 
-                # Update sidebar stats
-                with token_container:
-                    st.write(f"**Last Prompt:** {usage.prompt_token_count}")
-                    st.write(f"**Last Response:** {usage.candidates_token_count}")
-                    st.metric("Total Tokens Used", f"{st.session_state.total_tokens:,}")
-            
-            except Exception as e:
-                st.error(f"API Error: {e}")
+            st.markdown(full_res)
+            st.session_state.messages.append({"role": "assistant", "content": full_res})
