@@ -8,7 +8,7 @@ from io import BytesIO
 from dotenv import load_dotenv
 
 # --- 1. CONFIG & STYLING ---
-st.set_page_config(page_title="GEM >3 (OpenRouter)", layout="wide")
+st.set_page_config(page_title="GEM >3", layout="wide")
 
 st.markdown("""
     <style>
