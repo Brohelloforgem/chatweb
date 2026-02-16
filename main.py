@@ -11,17 +11,17 @@ import time
 import uuid
 
 # ============================================================
-# CONFIG
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
-    page_title="GEM >3 PRO",
+    page_title="GEM >3 PRO (FREE MODELS)",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ============================================================
-# CSS UI
+# CSS
 # ============================================================
 
 st.markdown("""
@@ -33,31 +33,20 @@ st.markdown("""
 }
 
 .stChatMessage {
-    border-radius: 14px;
+    border-radius: 12px;
     border: 1px solid #30363d;
     background-color: #161b22;
-    padding: 10px;
 }
 
 .copy-btn {
-    float:right;
-    font-size:12px;
-    padding:4px 8px;
-    border-radius:6px;
-    border:1px solid #30363d;
-    cursor:pointer;
-}
-
-.typing {
-    opacity:0.6;
-    font-style:italic;
+    font-size: 12px;
 }
 
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================================
-# ENV
+# LOAD ENV
 # ============================================================
 
 load_dotenv()
@@ -66,7 +55,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUT
 APP_PASSWORD = os.getenv("APP_PASSWORD") or st.secrets.get("APP_PASSWORD", "admin")
 
 # ============================================================
-# PASSWORD LOGIN
+# PASSWORD PROTECTION
 # ============================================================
 
 def check_password():
@@ -77,19 +66,23 @@ def check_password():
     if st.session_state.password_correct:
         return True
 
-    st.title("💠 Secure Neural Login")
+    st.title("🔐 GEM >3 Secure Access")
 
     pwd = st.text_input("Access Key", type="password")
 
     if st.button("Connect"):
 
         if pwd == APP_PASSWORD:
+
             st.session_state.password_correct = True
             st.rerun()
+
         else:
-            st.error("Access Denied")
+
+            st.error("Incorrect password")
 
     return False
+
 
 if not check_password():
     st.stop()
@@ -104,7 +97,7 @@ client = OpenAI(
 )
 
 # ============================================================
-# SESSION STATE
+# SESSION STATE INIT
 # ============================================================
 
 if "messages" not in st.session_state:
@@ -116,23 +109,12 @@ if "memory" not in st.session_state:
 if "uploaded_image" not in st.session_state:
     st.session_state.uploaded_image = None
 
-if "total_tokens" not in st.session_state:
-    st.session_state.total_tokens = 0
-
 # ============================================================
-# HELPERS
+# FREE MODEL FETCH
 # ============================================================
-
-def encode_image(image):
-
-    buffer = BytesIO()
-    image.save(buffer, format="PNG")
-
-    return base64.b64encode(buffer.getvalue()).decode()
-
 
 @st.cache_data(ttl=3600)
-def get_models(api_key):
+def get_free_models(api_key):
 
     try:
 
@@ -143,20 +125,37 @@ def get_models(api_key):
 
         data = r.json()["data"]
 
-        models = [m["id"] for m in data]
+        free_models = [
+            model["id"]
+            for model in data
+            if ":free" in model["id"]
+        ]
 
-        free = [m for m in models if ":free" in m]
-        paid = [m for m in models if ":free" not in m]
+        free_models.sort()
 
-        return free + paid
+        return free_models
 
     except:
 
-        return ["google/gemini-2.0-flash-lite:preview:free"]
+        return [
+            "google/gemini-2.0-flash-lite:preview:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
+            "deepseek/deepseek-chat:free",
+            "mistralai/mistral-7b-instruct:free"
+        ]
 
 # ============================================================
-# MEMORY SYSTEM
+# HELPERS
 # ============================================================
+
+def encode_image(image):
+
+    buffer = BytesIO()
+
+    image.save(buffer, format="PNG")
+
+    return base64.b64encode(buffer.getvalue()).decode()
+
 
 def update_memory(user, assistant):
 
@@ -169,7 +168,7 @@ def update_memory(user, assistant):
         st.session_state.memory.pop(0)
 
 
-def build_memory_prompt():
+def build_memory():
 
     text = ""
 
@@ -180,10 +179,6 @@ def build_memory_prompt():
 
     return text
 
-
-# ============================================================
-# CHAT EXPORT
-# ============================================================
 
 def export_json():
 
@@ -201,10 +196,6 @@ def export_txt():
     return text
 
 
-# ============================================================
-# COPY BUTTON
-# ============================================================
-
 def render_message(content):
 
     if "```" in content:
@@ -215,17 +206,16 @@ def render_message(content):
 
             if i % 2 == 1:
 
-                code_id = str(uuid.uuid4())
-
                 st.code(part)
 
-                if st.button("Copy", key=code_id):
+                if st.button("Copy", key=str(uuid.uuid4())):
                     st.toast("Copied")
 
             else:
                 st.markdown(part)
 
     else:
+
         st.markdown(content)
 
 # ============================================================
@@ -236,12 +226,19 @@ with st.sidebar:
 
     st.title("💠 GEM >3 PRO")
 
-    models = get_models(OPENROUTER_API_KEY)
+    free_models = get_free_models(OPENROUTER_API_KEY)
+
+    if not free_models:
+
+        st.error("No free models available")
+        st.stop()
 
     selected_model = st.selectbox(
-        "Model",
-        models
+        "Free Model",
+        free_models
     )
+
+    st.success("100% Free Model")
 
     temperature = st.slider(
         "Creativity",
@@ -262,20 +259,19 @@ with st.sidebar:
         value="You are GEM >3, futuristic AI assistant."
     )
 
-    # IMAGE
-    img = st.file_uploader("Image")
+    img = st.file_uploader("Upload Image")
 
     if img:
         st.session_state.uploaded_image = img
 
     if st.session_state.uploaded_image:
+
         st.image(st.session_state.uploaded_image)
 
         if st.button("Clear Image"):
             st.session_state.uploaded_image = None
             st.rerun()
 
-    # EXPORT
     st.download_button(
         "Export JSON",
         export_json(),
@@ -288,7 +284,6 @@ with st.sidebar:
         "chat.txt"
     )
 
-    # RESET
     if st.button("Reset Chat"):
 
         st.session_state.messages = []
@@ -312,19 +307,17 @@ for msg in st.session_state.messages:
 # VOICE INPUT
 # ============================================================
 
-voice = st.audio_input("Voice Input")
-
 voice_prompt = None
 
-if voice:
+audio = st.audio_input("Voice Input")
 
-    audio_bytes = voice.read()
+if audio:
 
     with open("voice.wav", "wb") as f:
-        f.write(audio_bytes)
+        f.write(audio.read())
 
     transcript = client.audio.transcriptions.create(
-        model="openai/whisper-1",
+        model="whisper-1",
         file=open("voice.wav", "rb")
     )
 
@@ -340,10 +333,16 @@ if voice_prompt:
     prompt = voice_prompt
 
 # ============================================================
-# GENERATE RESPONSE
+# RESPONSE GENERATION
 # ============================================================
 
 if prompt:
+
+    if ":free" not in selected_model:
+
+        st.error("Only free models allowed")
+
+        st.stop()
 
     st.session_state.messages.append({
         "role": "user",
@@ -363,14 +362,12 @@ if prompt:
 
         messages.append({
             "role": "system",
-            "content": system_prompt + "\nMemory:\n" + build_memory_prompt()
+            "content": system_prompt + "\nMemory:\n" + build_memory()
         })
 
         for m in st.session_state.messages:
-
             messages.append(m)
 
-        # IMAGE SUPPORT
         if st.session_state.uploaded_image and "gemini" in selected_model.lower():
 
             img = Image.open(st.session_state.uploaded_image)
@@ -378,50 +375,11 @@ if prompt:
             b64 = encode_image(img)
 
             messages[-1] = {
-
                 "role": "user",
-
                 "content": [
                     {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{b64}"
-                        }
+                        "image_url": {"url": f"data:image/png;base64,{b64}"}
                     }
                 ]
-            }
-
-        response = client.chat.completions.create(
-
-            model=selected_model,
-
-            messages=messages,
-
-            temperature=temperature,
-
-            max_tokens=max_tokens,
-
-            stream=True
-        )
-
-        for chunk in response:
-
-            delta = chunk.choices[0].delta
-
-            if delta and getattr(delta, "content", None):
-
-                full += delta.content
-
-                placeholder.markdown(full + "▌")
-
-                time.sleep(0.01)
-
-        placeholder.markdown(full)
-
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": full
-        })
-
-        update_memory(prompt, full)
