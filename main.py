@@ -116,26 +116,30 @@ if check_password():
                     status.update(label="System Error", state="error")
                     st.error(f"Error: {e}")
 # --- 4. CHAT INTERFACE ---
-if st.session_state.password_correct:  # Ensure we only run this if logged in
+if st.session_state.password_correct:
     
-    # 1. Initialize the Chat History for the API
-    # Move this INSIDE the authenticated block
+    # 1. DEFINE MODEL HERE (Available to the whole block)
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=sys_prompt)
+    except:
+        model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=sys_prompt)
+
+    # 2. Map History
     history = [
         {"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]}
         for m in st.session_state.messages
     ]
 
-    # 2. Initialize the model and chat session
-    # Use the model defined in your sidebar or re-define here
+    # 3. Start Chat Session
     chat_session = model.start_chat(history=history)
 
-    # 3. Display existing messages
+    # 4. Display existing messages
     for msg in st.session_state.messages:
         avatar = "🤖" if msg["role"] == "assistant" else "👤"
         with st.chat_message(msg["role"], avatar=avatar):
             st.markdown(msg["content"])
 
-    # 4. Handle new input
+    # 5. Handle new input
     if prompt := st.chat_input("Command GEM >3..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
@@ -144,11 +148,13 @@ if st.session_state.password_correct:  # Ensure we only run this if logged in
         with st.chat_message("assistant", avatar="🤖"):
             with st.status("GEM >3 is processing...", expanded=False) as status:
                 try:
+                    # Prepare content (Prompt + Image if exists)
                     content = [prompt, Image.open(uploaded_file)] if uploaded_file else prompt
                     
                     placeholder = st.empty()
                     full_response = ""
                     
+                    # Use the chat_session we initialized above
                     response = chat_session.send_message(content, stream=True)
                     
                     for chunk in response:
@@ -158,7 +164,7 @@ if st.session_state.password_correct:  # Ensure we only run this if logged in
                     
                     placeholder.markdown(full_response)
                     
-                    # Update metrics
+                    # Usage metrics
                     usage = response.usage_metadata
                     st.session_state.total_tokens += usage.total_token_count
                     token_display.metric("Total Usage", f"{st.session_state.total_tokens:,} tokens")
