@@ -6,41 +6,37 @@ from io import BytesIO
 from dotenv import load_dotenv
 
 # --- 1. CONFIG ---
-st.set_page_config(page_title="GEM >3 Auto-Pilot", layout="centered")
+st.set_page_config(page_title="GEM >3 Ultra-Free", layout="centered")
 
-# --- 2. THE "BEST FREE" PRIORITY LISTS (2026 Edition) ---
-# We prioritize speed and context window for text, and vision capabilities for images.
-FREE_TEXT_MODELS = [
-    "google/gemini-2.0-flash-lite:preview:free", 
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "mistralai/mistral-small-24b-instruct-2501:free"
-]
-
-FREE_VISION_MODELS = [
-    "google/gemini-2.0-flash-lite:preview:free",
-    "nvidia/llama-3.2-11b-vision-instruct:free",
-    "qwen/qwen-2-vl-7b-instruct:free"
-]
-
-# --- 3. SESSION INITIALIZATION ---
+# --- 2. SESSION INITIALIZATION ---
 if "messages" not in st.session_state: st.session_state.messages = []
-if "active_model" not in st.session_state: st.session_state.active_model = FREE_TEXT_MODELS[0]
+# We use the official 'openrouter/free' router for high reliability
+if "active_model" not in st.session_state: st.session_state.active_model = "openrouter/free"
 
-# --- 4. CORE HELPERS ---
+# --- 3. HELPER FUNCTIONS ---
 def encode_image(img):
     img = img.convert("RGB")
     buf = BytesIO()
     img.save(buf, format="JPEG")
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
-# --- 5. AUTH & CLIENT ---
+# --- 4. AUTH & CLIENT ---
 load_dotenv()
 api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
-client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1", 
+    api_key=api_key,
+    # Adding referer is often required for free models to work correctly
+    default_headers={
+        "HTTP-Referer": "http://localhost:8501", 
+        "X-Title": "GEM-3-Vision"
+    }
+)
 
 with st.sidebar:
-    st.title("🚀 Auto-Pilot Mode")
-    st.info("The system will automatically switch to the best available free model.")
+    st.title("🛰️ Smart Routing")
+    st.success("Mode: **OpenRouter Free Router**")
+    st.caption("Automatically detects Vision/Chat support and avoids limited models.")
     
     st.divider()
     uploaded_file = st.file_uploader("🖼️ Attach Image", type=["jpg", "png", "jpeg"])
@@ -49,34 +45,33 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-# --- 6. CHAT DISPLAY ---
+# --- 5. CHAT DISPLAY ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         if "image_b64" in m:
             st.image(f"data:image/jpeg;base64,{m['image_b64']}", use_container_width=True)
         st.markdown(m["content"])
 
-# --- 7. THE SMART-SWITCH LOGIC ---
+# --- 6. CHAT INPUT & DYNAMIC ROUTING ---
 if prompt := st.chat_input("Message GEM >3..."):
     user_msg = {"role": "user", "content": prompt}
-    is_vision_task = False
+    is_vision = False
     
     if uploaded_file:
         user_msg["image_b64"] = encode_image(Image.open(uploaded_file))
-        is_vision_task = True
+        is_vision = True
     
     st.session_state.messages.append(user_msg)
     
     with st.chat_message("user"):
-        if is_vision_task:
+        if is_vision:
             st.image(f"data:image/jpeg;base64,{user_msg['image_b64']}", use_container_width=True)
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Select the correct priority list
-        priority_list = FREE_VISION_MODELS if is_vision_task else FREE_TEXT_MODELS
+        # We use a single, robust API call to 'openrouter/free'
+        # It handles fallback, rate limits, and vision-support internally.
         
-        # Build API history
         api_messages = []
         for m in st.session_state.messages:
             if "image_b64" in m:
@@ -90,37 +85,24 @@ if prompt := st.chat_input("Message GEM >3..."):
             else:
                 api_messages.append({"role": m["role"], "content": m["content"]})
 
-        # FALLBACK EXECUTION: Try models in order until one works
-        def stream_with_fallback():
-            for model_id in priority_list:
-                try:
-                    # Log which model we are trying
-                    # st.caption(f"Attempting: {model_id}...") 
-                    
-                    stream = client.chat.completions.create(
-                        model=model_id,
-                        messages=api_messages,
-                        stream=True,
-                        # OpenRouter specific: tells it to try other models if this one fails
-                        extra_body={"models": priority_list} 
-                    )
-                    
-                    full_text = ""
-                    for chunk in stream:
-                        if chunk.choices and chunk.choices[0].delta.content:
-                            content = chunk.choices[0].delta.content
-                            full_text += content
-                            yield content
-                    
-                    # If we reach here, the model successfully finished
-                    st.session_state.active_model = model_id
-                    return 
-                    
-                except Exception as e:
-                    continue # Try the next model in the list
-            
-            yield "❌ All free models are currently offline or rate-limited. Please try again in a moment."
+        def stream_gen():
+            try:
+                # 'openrouter/free' will automatically pick from Gemini, Llama, Qwen, etc.
+                response = client.chat.completions.create(
+                    model="openrouter/free",
+                    messages=api_messages,
+                    stream=True
+                )
+                
+                full_text = ""
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        full_text += content
+                        yield content
+                
+            except Exception as e:
+                yield f"⚠️ **System Alert:** {str(e)}. Try refreshing or wait a minute for the free-tier reset."
 
-        full_res = st.write_stream(stream_with_fallback())
+        full_res = st.write_stream(stream_gen())
         st.session_state.messages.append({"role": "assistant", "content": full_res})
-        st.caption(f"Response generated by: `{st.session_state.active_model}`")
