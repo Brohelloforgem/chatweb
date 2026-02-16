@@ -3,82 +3,83 @@ from openai import OpenAI
 from PIL import Image
 import os, base64, requests, json
 from io import BytesIO
-from datetime import datetime
 from dotenv import load_dotenv
 
 # --- 1. CONFIG ---
-st.set_page_config(page_title="GEM >3 Vision", layout="centered")
+st.set_page_config(page_title="GEM >3 Auto-Pilot", layout="centered")
 
-# --- 2. SESSION INITIALIZATION ---
+# --- 2. THE "BEST FREE" PRIORITY LISTS (2026 Edition) ---
+# We prioritize speed and context window for text, and vision capabilities for images.
+FREE_TEXT_MODELS = [
+    "google/gemini-2.0-flash-lite:preview:free", 
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "mistralai/mistral-small-24b-instruct-2501:free"
+]
+
+FREE_VISION_MODELS = [
+    "google/gemini-2.0-flash-lite:preview:free",
+    "nvidia/llama-3.2-11b-vision-instruct:free",
+    "qwen/qwen-2-vl-7b-instruct:free"
+]
+
+# --- 3. SESSION INITIALIZATION ---
 if "messages" not in st.session_state: st.session_state.messages = []
-if "total_tokens" not in st.session_state: st.session_state.total_tokens = 0
+if "active_model" not in st.session_state: st.session_state.active_model = FREE_TEXT_MODELS[0]
 
-# --- 3. HELPER FUNCTIONS ---
+# --- 4. CORE HELPERS ---
 def encode_image(img):
-    """Standardize image to RGB and convert to base64."""
     img = img.convert("RGB")
     buf = BytesIO()
     img.save(buf, format="JPEG")
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
-@st.cache_data(ttl=3600)
-def get_engines(api_key):
-    try:
-        r = requests.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {api_key}"})
-        return [m['id'] for m in r.json().get('data', [])]
-    except: return ["google/gemini-2.0-flash-lite:preview:free"]
-
-# --- 4. AUTH & CLIENT ---
+# --- 5. AUTH & CLIENT ---
 load_dotenv()
 api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
 
 with st.sidebar:
-    st.title("⚙️ Control Panel")
-    engines = get_engines(api_key)
-    selected_model = st.selectbox("Intelligence Core", engines, index=0)
+    st.title("🚀 Auto-Pilot Mode")
+    st.info("The system will automatically switch to the best available free model.")
     
     st.divider()
-    # Image uploader stays in sidebar for a cleaner UI
     uploaded_file = st.file_uploader("🖼️ Attach Image", type=["jpg", "png", "jpeg"])
     
-    st.divider()
-    st.metric("Session Tokens", f"{st.session_state.total_tokens:,}")
     if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []
-        st.session_state.total_tokens = 0
         st.rerun()
 
-# --- 5. CHAT HISTORY DISPLAY ---
+# --- 6. CHAT DISPLAY ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         if "image_b64" in m:
             st.image(f"data:image/jpeg;base64,{m['image_b64']}", use_container_width=True)
         st.markdown(m["content"])
 
-# --- 6. CHAT INPUT & VISION LOGIC ---
+# --- 7. THE SMART-SWITCH LOGIC ---
 if prompt := st.chat_input("Message GEM >3..."):
-    # Store user message with image if present
     user_msg = {"role": "user", "content": prompt}
+    is_vision_task = False
+    
     if uploaded_file:
         user_msg["image_b64"] = encode_image(Image.open(uploaded_file))
+        is_vision_task = True
     
     st.session_state.messages.append(user_msg)
     
-    # Render user message
     with st.chat_message("user"):
-        if "image_b64" in user_msg:
+        if is_vision_task:
             st.image(f"data:image/jpeg;base64,{user_msg['image_b64']}", use_container_width=True)
         st.markdown(prompt)
 
-    # Render assistant response
     with st.chat_message("assistant"):
-        # BUILD PROPER MULTIMODAL HISTORY
-        api_messages = [{"role": "system", "content": "You are a helpful AI with vision capabilities."}]
+        # Select the correct priority list
+        priority_list = FREE_VISION_MODELS if is_vision_task else FREE_TEXT_MODELS
         
+        # Build API history
+        api_messages = []
         for m in st.session_state.messages:
             if "image_b64" in m:
-                # This is the "Multi-part" format required for vision
                 api_messages.append({
                     "role": m["role"],
                     "content": [
@@ -89,27 +90,37 @@ if prompt := st.chat_input("Message GEM >3..."):
             else:
                 api_messages.append({"role": m["role"], "content": m["content"]})
 
-        # STREAMING GENERATOR
-        def stream_gen():
-            try:
-                stream = client.chat.completions.create(
-                    model=selected_model,
-                    messages=api_messages,
-                    stream=True,
-                    stream_options={"include_usage": True}
-                )
-                for chunk in stream:
-                    # Update token count from usage chunk if available
-                    if hasattr(chunk, 'usage') and chunk.usage:
-                        st.session_state.total_tokens += chunk.usage.total_tokens
-                    # Yield text content
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        yield chunk.choices[0].delta.content
-            except Exception as e:
-                yield f"⚠️ API Error: {str(e)}"
+        # FALLBACK EXECUTION: Try models in order until one works
+        def stream_with_fallback():
+            for model_id in priority_list:
+                try:
+                    # Log which model we are trying
+                    # st.caption(f"Attempting: {model_id}...") 
+                    
+                    stream = client.chat.completions.create(
+                        model=model_id,
+                        messages=api_messages,
+                        stream=True,
+                        # OpenRouter specific: tells it to try other models if this one fails
+                        extra_body={"models": priority_list} 
+                    )
+                    
+                    full_text = ""
+                    for chunk in stream:
+                        if chunk.choices and chunk.choices[0].delta.content:
+                            content = chunk.choices[0].delta.content
+                            full_text += content
+                            yield content
+                    
+                    # If we reach here, the model successfully finished
+                    st.session_state.active_model = model_id
+                    return 
+                    
+                except Exception as e:
+                    continue # Try the next model in the list
+            
+            yield "❌ All free models are currently offline or rate-limited. Please try again in a moment."
 
-        full_res = st.write_stream(stream_gen())
+        full_res = st.write_stream(stream_with_fallback())
         st.session_state.messages.append({"role": "assistant", "content": full_res})
-        
-        # Trigger one final rerun to update the sidebar token metric
-        st.rerun()
+        st.caption(f"Response generated by: `{st.session_state.active_model}`")
