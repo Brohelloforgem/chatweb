@@ -96,3 +96,35 @@ if check_password():
 
             st.markdown(full_res)
             st.session_state.messages.append({"role": "assistant", "content": full_res})
+# ... (Security and Setup code) ...
+
+# 1. INITIALIZE TOTAL TOKENS
+if "total_tokens" not in st.session_state:
+    st.session_state.total_tokens = 0
+
+# 2. RENDER SIDEBAR AFTER CHAT PROCESSING (OR USE A PLACEHOLDER)
+with st.sidebar:
+    st.title("💠 GEM >3")
+    # We use a placeholder so we can update this metric even if it's "above" the chat in the code
+    token_placeholder = st.empty()
+    # Initial display
+    token_placeholder.metric("Total Tokens", f"{st.session_state.total_tokens:,}")
+
+# ... (Chat Display logic) ...
+
+if prompt := st.chat_input("Command GEM >3..."):
+    # ... (Display User Message) ...
+
+    with st.chat_message("assistant"):
+        with st.status("Thinking...") as status:
+            response = model.generate_content(content)
+            new_tokens = response.usage_metadata.total_token_count
+            
+            # 3. UPDATE THE STATE
+            st.session_state.total_tokens += new_tokens
+            status.update(label="Complete", state="complete")
+
+        st.markdown(response.text)
+        
+        # 4. FORCE A REFRESH OF THE SIDEBAR METRIC
+        token_placeholder.metric("Total Tokens", f"{st.session_state.total_tokens:,}")
