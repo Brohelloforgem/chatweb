@@ -7,15 +7,15 @@ from dotenv import load_dotenv
 # --- 1. MANDATORY FIRST COMMAND ---
 st.set_page_config(page_title="GEM >3", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. THEME & STYLING ---
+# --- 2. THEME & STYLING (Fixed keyword error) ---
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
     .stChatMessage { border-radius: 15px; border: 1px solid #30363d; background-color: #161b22; }
     /* Glowing effect for the GEM >3 brand */
-    .st-emotion-cache-1c7n2ka { color: #00d4ff !important; text-shadow: 0 0 10px #00d4ff; }
+    .st-emotion-cache-pf561s { color: #00d4ff !important; text-shadow: 0 0 10px #00d4ff; }
     </style>
-    """, unsafe_allow_code=True)
+    """, unsafe_allow_html=True) # FIXED: changed unsafe_allow_code to unsafe_allow_html
 
 # --- 3. SECURITY GATE ---
 def check_password():
@@ -40,7 +40,7 @@ if check_password():
     api_key = os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
     genai.configure(api_key=api_key)
 
-    # Initialize Sidebar
+    # Sidebar UI
     with st.sidebar:
         st.title("💠 GEM >3")
         st.caption("AI Vision & Cognition v2.6")
@@ -59,25 +59,25 @@ if check_password():
             st.session_state.total_tokens = 0
             st.rerun()
 
-    # Chat History
+    # Chat History Setup
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
+        avatar = "🤖" if msg["role"] == "assistant" else "👤"
+        with st.chat_message(msg["role"], avatar=avatar):
             st.markdown(msg["content"])
 
-    # User Input
+    # User Input & Processing
     if prompt := st.chat_input("Command GEM >3..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
+        with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
 
-        with st.chat_message("assistant"):
-            # Using st.status for a modern 2026 loading experience
+        with st.chat_message("assistant", avatar="🤖"):
             with st.status("GEM >3 is thinking...", expanded=False) as status:
                 try:
-                    # UPDATED: gemini-2.0-flash is the 2026 stable name
+                    # Stable 2026 Model Choice
                     model = genai.GenerativeModel('gemini-2.0-flash')
                     
                     content = [prompt, Image.open(uploaded_file)] if uploaded_file else [prompt]
@@ -92,7 +92,7 @@ if check_password():
                 except Exception as e:
                     status.update(label="System Error", state="error")
                     st.error(f"Neural breakdown: {e}")
-                    full_res = "I encountered an error. Please try again."
+                    full_res = "System failed to compute. Verify API Key and try again."
 
             st.markdown(full_res)
             st.session_state.messages.append({"role": "assistant", "content": full_res})
