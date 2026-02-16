@@ -374,12 +374,25 @@ if prompt:
 
             b64 = encode_image(img)
 
-            messages[-1] = {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{b64}"}
-                    }
-                ]
+         # IMAGE SUPPORT (Gemini free only)
+if st.session_state.uploaded_image and "gemini" in selected_model.lower():
+
+    img = Image.open(st.session_state.uploaded_image)
+
+    b64 = encode_image(img)
+
+    messages[-1] = {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": prompt
+            },
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{b64}"
+                }
+            }
+        ]
+    }
